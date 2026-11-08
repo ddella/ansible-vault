@@ -5,7 +5,7 @@ vault:
   # METADATA
   ############################################################
   metadata:
-    shared_secrets:
+    global_secrets:
       version: "2026-11-08"
       environment: "SANDBOX"            # PROD | NONPROD | SANDBOX
       purpose: "SECRETS"                # SECRETS | TOKEN

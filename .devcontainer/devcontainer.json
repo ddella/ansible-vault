@@ -45,8 +45,9 @@ docker pull registry.gitlab.com/ddella/avd-containers/avd6.5.0-python3.14:latest
     "DEVCONTAINER_IMAGE": "ghcr.io/ddella/avd-containers/acme-avd6.5.0-python3.14:latest"
   },
 
-  // tells the container to share the kernel's hostname namespace with your local machine
-  "runArgs": ["--uts=host"],
+  // tells the container to share the kernel's hostname namespace with your local machine and
+  // Allow the syscalls in the container.
+  "runArgs": ["--uts=host", "--security-opt", "seccomp=unconfined", "--security-opt", "systempaths=unconfined"],
   "remoteUser": "avd",
   "customizations": {
     "vscode": {
