@@ -1,135 +1,92 @@
 # Ansible Vault
 
-Complete guide to Ansible Vault
+A complete guide to Ansible Vault with `age` and SSH keys:
 
-* Multiple Ansible vault files
-  - Global Ansible vault for the main project
-  - Presonal Ansible vault per engineer
-* Master Ansible vault password encrypted at rest via SSH key
-* Private SSH key encrypted (optional)
+* Multiple Ansible Vault files
+  - A global Ansible Vault for the main project
+    * global_vars/global-ansible-vault-enc.yml
+  - A personal Ansible Vault for each engineer
+    * global_vars/personal-ansible-vault-enc.yml
+* Ansible Vault master passwords encrypted at rest with SSH keys
+  - .secrets/.global-ansible-vault.age
+  - .secrets/.personal-ansible-vault.age
+* SSH private key encrypted with a passphrase
 
-## Create repos
-
-Create repo in GitLab and GitHub via the GUI. Make sure not to create the `README.md` and `.gitignore` files.
-* 🦊 Create a new projet in GitLab
-* 😺 Create a new projet in GitHub
-
-The repo are:
-* `git@gitlab.com:ansible-avd/ansible-vault.git`
-* `git@github.com:ddella/ansible-vault.git`
-
-## </> Intialise a Git repo
-
-The project will push on both GitLab and GitHub. Let's initialise the git repository.
-
-```bash
-cd <existing_folder>
-git init --initial-branch=main --object-format=sha1
-```
-
-* `--object-format=sha1` is the right choice since GitHub doesn't accept SHA-256 repositories. GitLab has only partial SHA-256 support. SHA-1 is already Git's default, so the flag changes nothing, but it does record your choice.  
-* `--initial-branch=main` matches the default branch name that GitHub and GitLab both use, so your first push won't create a mismatched default branch.
-
-
-## Update both
-
-For pushing to both remote repositories, one common setup is a single `origin` remote with two push URLs:
-
-Execute this commands only once:
-```bash
-git remote add origin git@gitlab.com:ansible-avd/ansible-vault.git
-git remote set-url --add --push origin git@gitlab.com:ansible-avd/ansible-vault.git
-git remote set-url --add --push origin git@github.com:ddella/ansible-vault.git
-```
-After that, a single `git push` updates both.
-
-Output of `git remote -v`:
-```text
-origin  git@gitlab.com:ansible-avd/ansible-vault.git (fetch)
-origin  git@gitlab.com:ansible-avd/ansible-vault.git (push)
-origin  git@github.com:ddella/ansible-vault.git (push)
-```
-
-Fetches come from `GitLab`, and every push goes to both. You need the first `--add --push` line: once any push URL is set, Git stops pushing to the fetch URL. If you'd rather push to each host separately, add two remotes instead (`gitlab` and `github`).
-
-> ‼️IMPORTANT‼️  
-> Since the repo will be about Ansible Vault, add a `.gitignore` before your first commit so you don't commit secrets by accident.  
-
-## Push
-
-It's time to push our initial commit.
-
-This pushes to both remote repo in one command:
-
-```bash
-git add .
-git commit -m "Initial commit"
-git push -u origin main
-```
-
-It worked for GitLab but failed for GitHub.
-
-```text
-To github.com:ddella/ansible-vault.git
- ! [rejected]        main -> main (fetch first)
-error: failed to push some refs to 'github.com:ddella/ansible-vault.git'
-```
-
-When I created the repo on GitHub, it made its own "Initial commit" containing a `LICENSE` file. That commit had no common history with my local `main`, so GitHub rejected my initial push. It worked on GitLab because I didn't create any file.
-
-**Option 1: keep the LICENSE (recommended).** Merge GitHub's commit into your branch, then push to both hosts so they end up with the same history:
-
-```bash
-# This pulled the file LICENSE, on GitHub, to my local repo
-git merge github-tmp/main --allow-unrelated-histories -m "Merge GitHub initial commit (LICENSE)"
-# Push to both
-git push origin main
-# Remove the temporary ref
-git update-ref -d refs/remotes/github-tmp/main
-```
-
-`github-tmp/main` is a temporary ref I created when I fetched GitHub's `main` to check what was on it. I haven't merged or pushed anything.
-
-**Option 2: discard GitHub's commit.** If you don't want that LICENSE, overwrite GitHub with your history:
-
-```bash
-git push --force git@github.com:ddella/ansible-vault.git main
-git update-ref -d refs/remotes/github-tmp/main
-```
-
-To avoid this next time, just create the remote repo empty: leave the `README`, `.gitignore` and `LICENSE` boxes unchecked.
-
----
 
 # Workflow for Ansible Vault
 
-This workflow details how to create and manage multiple Ansible Vaults. You must be inside the DevContainer to execute these commands, as the environment requires `ansible-vault` and `age`. This assumes that all Ansible Vault master passwords are encrypted with a different master password, which is then encrypted with the SSH public keys of every member of the team, or just your personal SSH public key. Only one private key is needed to decrypt the password.
+This workflow shows how to create and manage multiple Ansible Vaults. Run these commands inside the DevContainer, since the environment requires `ansible-vault` and `age`.
 
-We will create two Ansible Vaults with the **same** top-level key. Every Ansible Vault will be structured as a Python dictionary:
+Each Ansible Vault is encrypted with its own master password. That master password is then encrypted with `age`, either with the SSH public keys of every team member or with just your own SSH public key. Any **one** matching private key can decrypt it.
 
-* Global Vault with all the secrets for the switches.
-* User-specific Vault with the CloudVision token.
+We will create two Ansible Vaults, each structured as a dictionary under the **same** top-level key (`vault`):
 
-> 📌 Since they have the **same** top-level key, the two vaults will be merged at runtime.  
-> 📌 This workflow assumes the SSH private key is encrypted.  
+* A global vault with all the secrets for the switches.
+* A user-specific vault with the CloudVision token.
 
-## Create Secret Directory
+> ⚠️ **Same top-level key ≠ automatic merge.** With Ansible's default `hash_behaviour = replace`, when two vars files define the same top-level key, the one loaded last **replaces** the other entirely. The two vaults are only merged if you set `hash_behaviour = merge` in `ansible.cfg` (discouraged by Ansible but supported), or combine them yourself with the `combine` filter. If the files are loaded by the `arista.avd.global_vars` plugin, check how it merges files before relying on it.
+> 📌 This workflow assumes the SSH private key is encrypted with a passphrase.
 
-Create a dedicated directory to store the following components:
+## How decryption works
 
-* The wrapper script designed to decrypt the Ansible Vault master password(s).
+When Ansible needs a vault password, it calls the wrapper script with the vault ID. The wrapper sends the matching encrypted master password to `age`, which decrypts it with the SSH private key that `ssh_key_cache.py` reads from the kernel keyring. The cleartext password goes back to Ansible on `stdout`. The dotted arrow is a one-time setup step.
+
+```mermaid
+flowchart TB
+    ansible["Ansible / ansible-vault<br/>needs the vault password"]
+    vaults[("Encrypted Ansible Vaults<br/>global_vars/*-enc.yml")]
+    wrapper["scripts/vault_wrapper-client.sh<br/>picks the .age file by vault ID"]
+    agefiles[("Encrypted master passwords<br/>.secrets/*.age")]
+    age["age<br/>decrypts the master password"]
+    cache["scripts/ssh_key_cache.py get<br/>keyctl wrapper"]
+    keyring{{"Kernel key retention service<br/>decrypted SSH private key, expires"}}
+    sshkey[("~/.ssh/id_ed25519_vault_lab<br/>passphrase-protected private key")]
+
+    vaults -->|reads| ansible
+    ansible -->|"Step 1: calls with --vault-id ID"| wrapper
+    agefiles -->|reads| wrapper
+    wrapper -->|"Step 2: encrypted .age file"| age
+    keyring -->|"Step 3: reads the key"| cache
+    cache -->|"Step 4: private key"| age
+    age -->|"Step 5: cleartext password"| wrapper
+    wrapper -->|"Step 6: password on stdout"| ansible
+    sshkey -.->|"One-time: ssh_key_cache.py store<br/>asks for the passphrase"| keyring
+
+    classDef program fill:#EEEDFE,stroke:#534AB7,color:#26215C
+    classDef file fill:#E1F5EE,stroke:#0F6E56,color:#04342C
+    classDef kernel fill:#F1EFE8,stroke:#5F5E5A,color:#2C2C2A
+    class ansible,wrapper,age,cache program
+    class vaults,agefiles,sshkey file
+    class keyring kernel
+```
+
+> 📌 Purple boxes are programs, green cylinders are files on disk, and the grey hexagon is kernel memory.
+
+We will create two Ansible Vaults, each structured as a dictionary under the **same** top-level key (`vault`):
+
+* A global vault with all the secrets for the switches.
+* A user-specific vault with the CloudVision token.
+
+> ⚠️ **Same top-level key ≠ automatic merge.** With Ansible's default `hash_behaviour = replace`, when two vars files define the same top-level key, the one loaded last **replaces** the other entirely. The two vaults are only merged if you set `hash_behaviour = merge` in `ansible.cfg` (discouraged by Ansible but supported), or combine them yourself with the `combine` filter. If the files are loaded by the `arista.avd.global_vars` plugin, check how it merges files before relying on it.
+> 📌 This workflow assumes the SSH private key is encrypted with a passphrase.
+
+## Create the secrets directory
+
+Create a dedicated directory for:
+
 * The encrypted Ansible Vault master password(s).
-* This script can utilize a user's SSH key pair to encrypt/decrypt the master password.
+* The cleartext vault files while you edit them.
+* The optional list of team SSH public keys.
 
 ```bash
 mkdir .secrets
 ```
 
-> 📌 The encrypted Ansible Vault files will ultimately be created within the `global_vars` directory.  
+> 📌 The wrapper script that decrypts the master passwords lives in `scripts/`, and the encrypted Ansible Vault files are created in `global_vars/`.
 
-### Source Control (.gitignore)
+### Source control (.gitignore)
 
-Ensure your `.gitignore` file contains at least the following entries. You must prevent the `.secrets/` directory and any file matching `*vault*` from leaking into source control, even if they are securely encrypted.
+Make sure your `.gitignore` contains at least the following entries. They keep the `.secrets/` directory and any file matching `*vault*` out of source control, even if those files are encrypted.
 
 ```text
 .secrets/
@@ -137,34 +94,46 @@ Ensure your `.gitignore` file contains at least the following entries. You must 
 *.age
 ```
 
-## 🔐 Generate Personal SSH Keys (Optional)
+> ⚠️ `*vault*` also matches files you probably **do** want to commit, such as `scripts/vault_wrapper-client.sh`, the templates `global-ansible-vault.yml` and `personal-ansible-vault.yml`, and the encrypted vaults in `global_vars/`. Re-include what you need with negation patterns placed **after** `*vault*`, for example:
+>
+> ```text
+> !scripts/vault_wrapper-client.sh
+> ```
+>
+> Also note that because `.secrets/` is ignored, the team-encrypted master password (`.global-ansible-vault.age`) never reaches Git. You'll need another way to share it with the team, or commit that one file deliberately: it is safe to share because only the listed private keys can decrypt it.
 
-You may use existing SSH keys or generate new ones specifically for a project. You can choose either `ed25519` or `rsa` algorithms to encrypt the master Ansible Vault password.
+## 🔐 Generate personal SSH keys (optional)
 
-> 📌 The use of the `ed25519` algorithm is highly recommended.
-> This workflow assumes the `${HOME}/.ssh` directory is properly mapped to the host inside your DevContainer.
+You can use existing SSH keys or generate new ones for the project. `age` can encrypt to either `ed25519` or `rsa` SSH keys.
+
+> 📌 `ed25519` is highly recommended.
+> 📌 This workflow assumes the `${HOME}/.ssh` directory is mapped from the host into your DevContainer.
 
 ```bash
 # Select the directory to store your keys
 SSH_DIRECTORY="${HOME}/.ssh"
 ssh-keygen -q -t ed25519 -C "email@example.com" -f "${SSH_DIRECTORY}/id_ed25519_vault_lab"
-# ssh-keygen -q -t rsa -b 2048 -C "email@example.com" -f "${SSH_DIRECTORY}/id_ed25519_vault_lab"
+# RSA alternative:
+# ssh-keygen -q -t rsa -b 4096 -C "email@example.com" -f "${SSH_DIRECTORY}/id_rsa_vault_lab"
 ```
 
-You will be asked for a passphrase to encrypt your private key. If you don't want to encrypt your private key, just add `-N ''` to `ssh-keygen`.
+You will be asked for a passphrase to encrypt your private key. If you don't want to encrypt it, add `-N ''` to `ssh-keygen`.
 
-This command will create the SSH key pair without asking for the passphrase:
+This command creates the key pair without asking for a passphrase:
+
 ```bash
-ssh-keygen -q -t ed25519 -N '' -C "My SSH Key for Ansible Vault" -f "${SSH_DIRECTORY}/id_ed25519_avd" <<<y >/dev/null 2>&1
+ssh-keygen -q -t ed25519 -N '' -C "My SSH Key for Ansible Vault" -f "${SSH_DIRECTORY}/id_ed25519_vault_lab"
 ```
 
-## Create a File with Public SSH Keys (Optional)
+> ⚠️ Don't feed `<<<y` to `ssh-keygen` to skip its prompt: that answer is "yes, overwrite", and it silently replaces an existing key with the same name. If the old key encrypted a master password, you lose access to it.
 
-If you want to encrypt your Ansible Vault master password with multiple public keys, you can compile a text file containing all the public keys authorized to encrypt the master password. This file does not require strict protection as it solely contains public keys. The Ansible master password will be encrypted against every public key listed in this file, meaning only **one** corresponding private key is required for successful decryption.
+## Create a file with public SSH keys (optional)
 
-> 📌 The recommended filename is `team_ssh_keys.txt`.
+To encrypt the Ansible Vault master password for several people, put all the authorized public keys in one text file. The master password is encrypted to every key in the file, and any **one** matching private key can decrypt it.
 
-This file contains all the public keys used to encrypt the master password for Ansible Vault. It is safe to transfer those keys via an unsecured medium.
+This file contains only public keys, so it needs no special protection and can be shared over an unsecured channel.
+
+> 📌 The recommended filename is `team_ssh_keys.txt`. Lines starting with `#` are treated as comments by `age`.
 
 ```bash
 cat <<EOF > .secrets/team_ssh_keys.txt
@@ -175,309 +144,398 @@ ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIJ6Lp60VWKC6sB5kB8Xs+13N+Ldv8qWy2MgfJhHB6dk
 EOF
 ```
 
-> I have included the public key of Eve, since she will eventually be eavesdropping 🕵
+> 🕵 I've included Eve's key because she'll eventually be eavesdropping. Joke aside, everyone in this file can decrypt the master password, so review it carefully before you encrypt.
 
-## 🤝 Naming Convention
+## 🤝 Naming convention
 
-Standard naming conventions for this tutorial are:
+Naming used in this tutorial:
 
-| Cleartext file | Encrypted file | Usage | Vault id |
+| Cleartext file | Encrypted file | Usage | Vault ID |
 | --- | --- | --- | --- |
-| global-ansible-vault.yml | global-ansible-vault-enc.yml | Global secrets | global |
-| personal-ansible-vault.yml | personal-ansible-vault-enc.yml | Personal secrets | personal |
-| .global-ansible-vault.txt | .global-ansible-vault.age | Ansible Vault password (global) | password123 |
-| .personal-ansible-vault.txt | .personal-ansible-vault.age | Ansible Vault password (personal) | password456 |
+| `global-ansible-vault.yml` | `global-ansible-vault-enc.yml` | Global secrets | `global` |
+| `personal-ansible-vault.yml` | `personal-ansible-vault-enc.yml` | Personal secrets | `personal` |
+| `.global-ansible-vault.txt` | `.global-ansible-vault.age` | Master password for the `global` vault (example: `password123`) | `global` |
+| `.personal-ansible-vault.txt` | `.personal-ansible-vault.age` | Master password for the `personal` vault (example: `password456`) | `personal` |
 
-🚫❌🙅⛔ Please never add your password, I did this to follow the tutorial 🚫❌🙅⛔
+🚫❌🙅⛔ Never write your real passwords down like this. I did it only so you can follow the tutorial. 🚫❌🙅⛔
 
 ---
 
 # 🌐 🏛️ Global Vault
 
-This creates the global Ansible Vault that contains all the secrets for the project. The master password to decrypt this vault will be encrypted with the public keys of all authorized members.
+This creates the global Ansible Vault with all the secrets for the project. Its master password is encrypted with the public keys of all authorized team members.
 
-> 📌 This is usually executed by only one member of the team.
+> 📌 This is usually done by only one member of the team.
 
+## Step 1: 🔐 Encrypt the Ansible Vault master password
 
-## Step 1: 🔐 Encrypt the Ansible Master Password
-
-First, create a temporary file containing the cleartext Ansible Vault master password. This is the password used by `ansible-vault encrypt ...`.
+First, create a temporary file containing the cleartext master password. This is the password `ansible-vault encrypt` will use.
 
 ```bash
-INPUT_FILE="/workspaces/Ansible-Vault/.secrets/.global-ansible-vault.txt"
+INPUT_FILE=".secrets/.global-ansible-vault.txt"
 vi "${INPUT_FILE}"
 ```
 
-> ⛔ Do not use `echo -n "my-super-secret" > .secrets/.global-ansible-vault.txt`, as the cleartext password will be recorded in your shell history.
+> ⛔ Don't use `echo -n "my-super-secret" > .secrets/.global-ansible-vault.txt`, because the cleartext password will be recorded in your shell history.
+> 📌 `vi` adds a newline at the end of the file. That's fine: Ansible strips trailing `\r\n` from the output of a password client script.
 
-
-Encrypt the Ansible master password file using `age` with the public keys of all members of the team. Only **one** private key is needed to decrypt the password.
-
-```bash
-INPUT_FILE="/workspaces/Ansible-Vault/.secrets/.global-ansible-vault.txt"
-ENCRYPTED_FILE="/workspaces/Ansible-Vault/.secrets/.global-ansible-vault.age"
-PUBLIC_KEYS_FILE="/workspaces/Ansible-Vault/.secrets/team_ssh_keys.txt"
-
-age -R ${PUBLIC_KEYS_FILE} ${INPUT_FILE} | base64 -w 0 > ${ENCRYPTED_FILE}
-
-# ❗🗑️ **Important:** Securely remove the file containing the cleartext password once encryption is complete.
-shred -u -v -n 3 ${INPUT_FILE}
-```
-
-## Step 2: 🔓 Decrypt the Ansible Master Password (Optional)
-
-To verify the encryption was successful, attempt to decrypt the password using your SSH private key. If the private key was encrypted, `age` will ask for the `passphrase`.
+Encrypt the master password file with `age`, using the public keys of every team member:
 
 ```bash
-PRIVATE_KEY="$HOME/.ssh/id_ed25519_vault_lab"
-base64 -d ${ENCRYPTED_FILE} | age -d -i ${PRIVATE_KEY}
+INPUT_FILE=".secrets/.global-ansible-vault.txt"
+ENCRYPTED_FILE=".secrets/.global-ansible-vault.age"
+PUBLIC_KEYS_FILE=".secrets/team_ssh_keys.txt"
+
+age -R "${PUBLIC_KEYS_FILE}" "${INPUT_FILE}" | base64 -w 0 > "${ENCRYPTED_FILE}"
+
+# ❗🗑️ Important: securely remove the cleartext password once encryption is complete
+shred -u -v -n 3 "${INPUT_FILE}"
 ```
 
-> 📌 The output must successfully display the password that was encrypted in the previous step.
+> 📌 `shred` can't guarantee the data is gone on copy-on-write or journaling filesystems (for example Btrfs, ZFS, or a container's overlay filesystem), and `vi` may have left a swap file. Treat `shred` as best effort.
 
-## 🏛️ Step 3: Create the Ansible Vault File
+## Step 2: 🔓 Decrypt the Ansible Vault master password (optional)
 
-Create the initial unencrypted Ansible Vault file from the master template `global-ansible-vault.yml`. Save the file in the `.secrets/` directory.
+To verify the encryption, decrypt the password with your SSH private key. If the private key is encrypted, `age` asks for its passphrase.
 
 ```bash
-cp global-ansible-vault.yml .secrets/.
+ENCRYPTED_FILE=".secrets/.global-ansible-vault.age"
+PRIVATE_KEY="${HOME}/.ssh/id_ed25519_vault_lab"
+base64 -d "${ENCRYPTED_FILE}" | age -d -i "${PRIVATE_KEY}"
 ```
 
-Edit the file `.secrets/global-ansible-vault.yml` and *modify/add/change/delete* the necessary values.
+> 📌 The output must be the password you encrypted in the previous step.
 
-> 🚫 Do not modify the top-level key `vault`.
+## 🏛️ Step 3: Create the Ansible Vault file
 
+Create the initial cleartext vault file from the template `global-ansible-vault.yml` and save it in the `.secrets/` directory:
 
-## 🎁 Step 4: Create the keyctl Script
+```bash
+cp global-ansible-vault.yml .secrets/
+```
 
-If the SSH private key is encrypted, each time you will use it with `age`, you will be asked to enter the passphrase. You can skipt this step but having your private key stored in the Kernel **key retention service**. That service lets the kernel hold secrets such as passwords, Kerberos tickets, encryption keys and certificates in kernel memory. They never need to sit in a file, and access to them is controlled.
+Edit `.secrets/global-ansible-vault.yml` and modify, add or delete values as needed.
 
-You will need a tool like, **keyctl**, to interact with the Linux kernel's **key retention service** in the userspace
+> 🚫 Don't change the top-level key `vault`.
+
+## 🎁 Step 4: Cache the SSH private key in the kernel keyring
+
+If your SSH private key is encrypted, `age` asks for its passphrase every time it uses the key. To avoid that, you can store the decrypted key in the Linux kernel's **key retention service**. That service holds secrets such as passwords, Kerberos tickets, encryption keys and certificates in kernel memory, so they never sit in a file, and access to them is controlled.
+
+From userspace, you talk to the key retention service with a tool like **keyctl**. The script `scripts/ssh_key_cache.py` is a wrapper around `keyctl`.
+
+> ⚠️ While cached, the decrypted private key is available to any process that can reach your keyring. Keep the timeout as short as your workday allows.
 
 **Gotchas**
-- Keys disappear when their last keyring link is dropped. A key held only in `@s` is lost when the session ends.
+
+- A key disappears when its last keyring link is dropped. A key held only in the session keyring (`@s`) is lost when the session ends.
 - Containers and `sudo` can land in a different session keyring than you expect, so "key not found" is often a scoping issue. Check with `keyctl show`.
 - Permission masks have separate possessor, user, group and other fields. "Possessor" means you can reach the key through your own keyrings.
 
-The script `ssh_key_cache.py` is the wrapper around the `keyctl` utility in Linux.
-
-This command will decrypt the SSH private key and store it in Linux kernel's **key retention service** under the name `global-secrets`.
+This command decrypts the SSH private key and stores it in the key retention service under the name `global-secrets` for 8 hours:
 
 ```bash
-scripts/ssh_key_cache.py store ~/.ssh/id_ed25519_vault_lab --hours 15 --name global-secrets
+scripts/ssh_key_cache.py store ~/.ssh/id_ed25519_vault_lab --hours 8 --name global-secrets
 ```
 
-To read the secret, you use the `get` argument an pipe the result to any program that needs it to decrypt your Ansible Vault master password.
+To read the secret, use the `get` argument and pipe the result to any program that needs it to decrypt the master password:
 
 ```bash
 scripts/ssh_key_cache.py get --name global-secrets | <some other utility>
 ```
 
-## 🎁 Step 5: Create the Wrapper Script
+## 🎁 Step 5: Wrapper script
 
-If you intend to test the wrapper script directly via a shell **AND** are using the script above you don't need the `AGE_PRIVATE_KEY` environment variable.
-
-* `export AGE_PRIVATE_KEY="$HOME/.ssh/id_ed25519_vault_lab"`
-
-The script is executed by Ansible Vault with 2 parameters:
-* `/workspaces/Ansible-Vault/.secrets/vault_wrapper-client.sh --vault-id global`
-
-To create a vault password client script:
-* Create a file with a name ending in either `-client` or` -client.EXTENSION`.
-* Make the file executable
-* Within the script itself:
-  * Print the passwords to standard output
-  * Accept a `--vault-id` option
-  * If the script prompts for data (for example, a database password), display the prompts to the TTY.
-
-### 🧪 Verification
-
-To test the wrapper script, you can run it manually and provide the following parameters:
-
-* `--vault-id`
-* `<repo>` (e.g., `global`, `personal`)
-
-Example verification for `global`:
+Ansible calls the wrapper script with two arguments:
 
 ```bash
 scripts/vault_wrapper-client.sh --vault-id global
 ```
 
-It should print the unencrypted password to `stdout`.
+Requirements for an Ansible Vault password client script:
+
+* The filename must end in `-client` or `-client.EXTENSION`.
+* The file must be executable.
+* The script must:
+  * Print the password to standard output.
+  * Accept a `--vault-id` option.
+  * Display any prompts (for example, the SSH key passphrase) on the TTY, not on standard output.
+
+Reference script, `scripts/vault_wrapper-client.sh`. It uses the key cached in Step 4, or the key file in `AGE_PRIVATE_KEY` if that variable is set:
+
+> 📌 Exit with an error for an unknown vault ID rather than printing a default password: a wrong ID then fails loudly instead of producing a confusing decryption error.
+> 📌 If you're **not** using the key cache from Step 4, point the script at your key file:
+> `export AGE_PRIVATE_KEY="${HOME}/.ssh/id_ed25519_vault_lab"`
+
+### 🧪 Verification
+
+To test the wrapper script, run it manually with `--vault-id` followed by the vault ID (`global` or `personal`):
+
+```bash
+scripts/vault_wrapper-client.sh --vault-id global
+```
+
+It should print the cleartext master password on `stdout`.
 
 ## Step 6: ansible.cfg
 
-Ansible automatically loads `ansible.cfg` only if it is located within your current working directory. If you run the `ansible-vault` command from a separate folder, you must define the configuration path explicitly:
+Ansible looks for its configuration in this order and uses the first one it finds: the `ANSIBLE_CONFIG` environment variable, `ansible.cfg` in the current directory, `~/.ansible.cfg`, then `/etc/ansible/ansible.cfg`. If you run `ansible-vault` from another folder, set the path explicitly:
 
 ```bash
 export ANSIBLE_CONFIG="/workspaces/Ansible-Vault/ansible.cfg"
 ```
 
+> ⚠️ Ansible ignores an `ansible.cfg` in the current directory if that directory is world-writable, which is common with mounted volumes in DevContainers. Setting `ANSIBLE_CONFIG` avoids the problem.
+
 Your `ansible.cfg` should look like this:
 
 ```ini
 [defaults]
-vault_identity_list = global@/workspaces/Ansible-Vault/scripts/vault_wrapper-client.sh, personal@/workspaces/Ansible-Vault/scripts/vault_wrapper-client.sh
+vault_identity_list = global@scripts/vault_wrapper-client.sh, personal@scripts/vault_wrapper-client.sh
 ```
 
-> 📌 This is for the `nonprod` environment.
-
+> 📌 This is for the `global` environment.
 
 ## Step 7: Encrypt the Ansible Vault
 
-Use the following commands to create the encrypted version of the global Ansible Vault file from your unencrypted source:
+Create the encrypted version of the global vault from the cleartext file:
 
 ```bash
-# Point to a completely different configuration file
-export VAULT_FILE_CLEAR="/workspaces/Ansible-Vault/.secrets/global-ansible-vault.yml"
-export VAULT_FILE_ENC="/workspaces/Ansible-Vault/global_vars/global-ansible-vault-enc.yml"
+export VAULT_FILE_CLEAR=".secrets/global-ansible-vault.yml"
+export VAULT_FILE_ENC="global_vars/global-ansible-vault-enc.yml"
 export VAULT_ID="global"
 
-# Encrypting with Vault IDs
-# override the Ansible Vault list because we haven't done 'personal' vault yet.
-ANSIBLE_VAULT_IDENTITY_LIST="global@/workspaces/Ansible-Vault/scripts/vault_wrapper-client.sh" \
+# Override the vault identity list, because the 'personal' vault doesn't exist yet
+# and Ansible would otherwise fail calling the wrapper for it.
+ANSIBLE_VAULT_IDENTITY_LIST="global@scripts/vault_wrapper-client.sh" \
   ansible-vault encrypt "${VAULT_FILE_CLEAR}" --encrypt-vault-id "${VAULT_ID}" --output "${VAULT_FILE_ENC}"
 ```
 
-* The encrypted Ansible Vault will reside in the directory `<repo name>/global_vars` and is defined globally.
-* See the naming convention for the encrypted Ansible Vault.
+* The encrypted vault lives in `<repo name>/global_vars` and is defined globally.
+* See the [naming convention](#-naming-convention) for the encrypted filename.
 
-> ❗ Because Ansible Vault encrypt invokes the wrapper script to perform the vault encryption, the process will fail if any preceding steps were executed incorrectly.
-
+> ❗ Because `ansible-vault encrypt` calls the wrapper script to get the master password, it fails if any earlier step went wrong.
+> 📌 Once the encrypted file is in place, you can `shred` the cleartext copy in `.secrets/` and make future changes with `ansible-vault edit global_vars/global-ansible-vault-enc.yml`, which never leaves a cleartext file behind.
 
 ## 🔎 Step 8: Read the Ansible Vault
 
-This command will read the encrypted Ansible Vault global, decrypt it and output the results on stdout.
+This command decrypts the global vault and prints the result on `stdout`. The password comes from `vault_identity_list`:
 
 ```bash
-ansible-vault decrypt --vault-id global --output - global_vars/global-ansible-vault-enc.yml
+ansible-vault view global_vars/global-ansible-vault-enc.yml
+# or, without a pager:
+ansible-vault decrypt --output - global_vars/global-ansible-vault-enc.yml
 ```
+
+> ⚠️ Don't pass `--vault-id global` on its own: without an `@source`, Ansible treats `global` as the path to a password file and fails with `The vault password file .../global was not found`. To name the source explicitly, use `--vault-id global@scripts/vault_wrapper-client.sh`.
 
 ---
 
-# 🧑🏻‍💻 🎟️ Personal Token for CVaaS
+# 🧑🏻‍💻 🎟️ Personal token for CVaaS
 
-This creates a new Ansible Vault that contains your personal secrets.
+This creates a second Ansible Vault for your personal secrets.
 
-## Step 1: 🔐 Encrypt the Ansible Master Password
+## Step 1: 🔐 Encrypt the Ansible Vault master password
 
-First, create a temporary file containing the cleartext Ansible Vault master password. This is the password used by `ansible-vault encrypt ...`.
+First, create a temporary file containing the cleartext master password. This is the password `ansible-vault encrypt` will use.
 
 ```bash
-INPUT_FILE="/workspaces/Ansible-Vault/.secrets/.personal-ansible-vault.txt"
+INPUT_FILE=".secrets/.personal-ansible-vault.txt"
 vi "${INPUT_FILE}"
 ```
 
-> ⛔ Do not use `echo -n "my-super-secret" > .secrets/.personal-ansible-vault.txt`, as the cleartext password will be recorded in your shell history.
+> ⛔ Don't use `echo -n "my-super-secret" > .secrets/.personal-ansible-vault.txt`, because the cleartext password will be recorded in your shell history.
 
-Encrypt the Ansible master password file using `age` but this time only with your public key. Only you can decrypt the password.
+Encrypt the master password file with `age`, this time with **only** your public key, so only you can decrypt it:
 
 ```bash
-OUTPUT_FILE="/workspaces/Ansible-Vault/.secrets/.personal-ansible-vault.age"
-PUBLIC_KEY="$HOME/.ssh/id_ed25519_vault_lab.pub"
+INPUT_FILE=".secrets/.personal-ansible-vault.txt"
+ENCRYPTED_FILE=".secrets/.personal-ansible-vault.age"
+PUBLIC_KEY="${HOME}/.ssh/id_ed25519_vault_lab.pub"
 
 # Encrypt the password and save it to a file
-age --encrypt -R "${PUBLIC_KEY}" "${INPUT_FILE}" | base64 -w 0 > "${OUTPUT_FILE}"
+age --encrypt -R "${PUBLIC_KEY}" "${INPUT_FILE}" | base64 -w 0 > "${ENCRYPTED_FILE}"
 
-# ❗🗑️ **Important:** Securely remove the file containing the cleartext password once encryption is complete.
-shred -u -v -n 3 ${INPUT_FILE}
+# ❗🗑️ Important: securely remove the cleartext password once encryption is complete
+shred -u -v -n 3 "${INPUT_FILE}"
 ```
 
-## Step 2: 🔓 Decrypt the Ansible Master Password (Optional)
+## Step 2: 🔓 Decrypt the Ansible Vault master password (optional)
 
-To verify the encryption was successful, attempt to decrypt the password using your SSH private key.
+To verify the encryption, decrypt the password with your SSH private key:
 
 ```bash
-ENCRYPTED_FILE="/workspaces/Ansible-Vault/.secrets/.personal-ansible-vault.age"
-PRIVATE_KEY="$HOME/.ssh/id_ed25519_vault_lab"
-base64 -d ${ENCRYPTED_FILE} | age -d -i ${PRIVATE_KEY}
+ENCRYPTED_FILE=".secrets/.personal-ansible-vault.age"
+PRIVATE_KEY="${HOME}/.ssh/id_ed25519_vault_lab"
+base64 -d "${ENCRYPTED_FILE}" | age -d -i "${PRIVATE_KEY}"
 ```
 
-> 📌 The output must successfully display the password that was encrypted in the previous step.
+> 📌 The output must be the password you encrypted in the previous step.
 
-## 🏛️ Step 3: Create the personal Ansible Vault File
+## 🏛️ Step 3: Create the personal Ansible Vault file
 
-Create your initial unencrypted Ansible personal Vault file from the master template `personal-ansible-vault.yml`. Save the file in the `.secrets/` directory.
+Create your initial cleartext personal vault from the template `personal-ansible-vault.yml` and save it in the `.secrets/` directory:
 
 ```bash
-cp personal-ansible-vault.yml .secrets/.
+cp personal-ansible-vault.yml .secrets/
 ```
 
-Edit the file `.secrets/personal-ansible-vault.yml` and replace your secrets.
+Edit `.secrets/personal-ansible-vault.yml` and fill in your secrets.
 
-## 🎁 Step 4: Wrapper Script
+## 🎁 Step 4: Wrapper script
 
-This should have been created earlier. The decryption on the file `.personal-ansible-vault.age` is done via your SSH private key.
+The wrapper script was created in the global vault section. It decrypts `.personal-ansible-vault.age` with your SSH private key.
 
-This needs to be added to the wrapper script so it knows how to decrypt the Ansible Vault `personal`.
+If your script doesn't handle `personal` yet, add this branch so it knows how to decrypt the `personal` vault's master password:
 
 ```bash
-### Personal Secrets for `personal`
-elif [[ "$VAULT_ID" == "personal" ]]; then
-  base64 -d /workspaces/Ansible-Vault/.secrets/.personal-ansible-vault.age \
-  | age -d -i <(python3 /workspaces/Ansible-Vault/scripts/ssh_key_cache.py get --name personal-secrets)
+### Personal secrets
+elif [[ "${VAULT_ID}" == "personal" ]]; then
+  base64 -d .secrets/.personal-ansible-vault.age \
+  | age -d -i <(python3 scripts/ssh_key_cache.py get --name personal-secrets)
 ```
 
-## 🔑 Step 5: Store private key
+## 🔑 Step 5: Store the private key
 
-Decrypt your private SSH key and store it in the Kernel **key retention service**.
+Decrypt your SSH private key and store it in the kernel key retention service:
 
 ```bash
-scripts/ssh_key_cache.py store ~/.ssh/id_ed25519_vault_lab --hours 15 --name personal-secrets
+scripts/ssh_key_cache.py store ~/.ssh/id_ed25519_vault_lab --hours 8 --name personal-secrets
 ```
 
-To read the secret, you use the `get` argument an pipe the result to any program that needs it to decrypt your Ansible Vault master password.
+> 📌 This is the same SSH key as `global-secrets`. Caching it under two names keeps the vaults independent (for example, if the global vault later uses a team key), but you could point both branches of the wrapper at one name.
+
+To read the secret, use the `get` argument and pipe the result to any program that needs it. `show` displays information about the cached key:
 
 ```bash
 scripts/ssh_key_cache.py get --name personal-secrets | <some other utility>
-scripts/ssh_key_cache.py show --name personal-secrets 
+scripts/ssh_key_cache.py show --name personal-secrets
 ```
 
 ### 🧪 Verification
 
-To test the wrapper script, you can run it manually and provide the following parameters:
-
-* `--vault-id`
-* `<repo>` (e.g., `global`, `personal`)
-
-Example verification for `personal`:
+To test the wrapper script, run it manually with `--vault-id` followed by the vault ID (`global` or `personal`):
 
 ```bash
 scripts/vault_wrapper-client.sh --vault-id personal
 ```
 
-It should print the unencrypted password on `stdout`.
+It should print the cleartext master password on `stdout`.
 
-# 🔐 Step 6: Encrypt the personal Ansible Vault
+## 🔐 Step 6: Encrypt the personal Ansible Vault
 
-Use the following commands to create the encrypted version of your personal Ansible Vault file from your unencrypted source:
+Create the encrypted version of your personal vault from the cleartext file:
 
 ```bash
-export VAULT_FILE=".secrets/personal-ansible-vault.yml"
-export OUTPUT_FILE="global_vars/personal-ansible-vault-enc.yml"
+export VAULT_FILE_CLEAR=".secrets/personal-ansible-vault.yml"
+export VAULT_FILE_ENC="global_vars/personal-ansible-vault-enc.yml"
 export VAULT_ID="personal"
 
-# Encrypting with Vault IDs
-ansible-vault encrypt ${VAULT_FILE} --encrypt-vault-id ${VAULT_ID} --output ${OUTPUT_FILE}
+ansible-vault encrypt "${VAULT_FILE_CLEAR}" --encrypt-vault-id "${VAULT_ID}" --output "${VAULT_FILE_ENC}"
 ```
 
-* The encrypted Ansible Vault must reside in the directory `<repo name>/global_vars` and is defined globally.
+* The encrypted vault must live in `<repo name>/global_vars` and is defined globally.
 
-Because Ansible Vault invokes the wrapper script to perform the vault encryption, the process will fail if any preceding steps were executed incorrectly.
+> ❗ Because `ansible-vault encrypt` calls the wrapper script for **every** ID in `vault_identity_list`, it fails if any earlier step (global or personal) went wrong.
 
 ## 🔎 Step 7: Read the personal Ansible Vault
 
-This command will read the encrypted personal Ansible Vault, decrypt it and output the results on stdout.
+This command decrypts the personal vault and prints the result on `stdout`:
 
 ```bash
-ansible-vault decrypt --vault-id personal --output - global_vars/personal-ansible-vault-enc.yml
+ansible-vault view global_vars/personal-ansible-vault-enc.yml
+# or, without a pager:
+ansible-vault decrypt --output - global_vars/personal-ansible-vault-enc.yml
 ```
 
-## 📚 Step 8: Read the Ansible Vault with a playbook
+## 📚 Step 8: Read the Ansible Vaults with a playbook
 
-Run the playbook `playbooks/verify_global_secrets.yml`. It will print some values included in both Ansible Vaults.
+Run the playbook `playbooks/read_vaults.yml`. It prints some values from both vaults:
 
 ```bash
-ansible-playbook -i localhost, -c local -e "user=DDN" playbooks/verify_global_secrets.yml
+ansible-playbook -i localhost, -c local -e "user=DDN" playbooks/read_vaults.yml
 ```
 
+> 📌 If values from one vault are missing, the two `vault` dictionaries were replaced rather than merged. See the note at the top of [Workflow for Ansible Vault](#workflow-for-ansible-vault).
+
+---
+
+# 🛠️⚙️🔧 Troubleshooting
+
+## 🔓 Step 1: Decrypt the Ansible Vault master password
+
+Decrypt the master password with your SSH **private** key. The password was encrypted with your SSH public key, so only the matching private key can decrypt it.
+
+You will be prompted for the passphrase of your SSH private key.
+
+```bash
+SECRET_FILE=".secrets/.global-ansible-vault.age"
+IDENTITY_FILE="${HOME}/.ssh/id_ed25519_vault_lab"
+base64 -d "${SECRET_FILE}" | age -d -i "${IDENTITY_FILE}"
+```
+
+```bash
+SECRET_FILE=".secrets/.personal-ansible-vault.age"
+IDENTITY_FILE="${HOME}/.ssh/id_ed25519_vault_lab"
+base64 -d "${SECRET_FILE}" | age -d -i "${IDENTITY_FILE}"
+```
+
+> ✅ The output should be the cleartext password used to encrypt the vault.
+> ❌ `age: error: no identity matched any of the recipients` means you supplied the wrong private key, or your public key wasn't one of the recipients.
+
+To check that the file was encrypted by `age`, and to which recipient types, without decrypting it (`age-inspect` requires age v1.3.0 or later):
+
+```bash
+base64 -d "${SECRET_FILE}" | age-inspect --json
+```
+
+## 🎁 Step 2: Test the wrapper script
+
+Run the wrapper directly and check that it prints the master password on `stdout`, with nothing else in the output:
+
+```bash
+scripts/vault_wrapper-client.sh --vault-id global
+scripts/vault_wrapper-client.sh --vault-id personal
+```
+
+> ✅ The output should be the cleartext password used to encrypt the vault. A single trailing newline is fine, because Ansible strips it.
+> ❌ `Key not found or expired` means your SSH private key isn't in the kernel key retention service or its timeout has expired.
+> ❌ `unknown vault id` (or `default_password`, if your script still prints a fallback) means the vault ID doesn't exist or isn't handled by the script. A `%` right after the output is just zsh marking a missing final newline.
+
+## 🧩 Step 3: Check the kernel key retention service
+
+```bash
+scripts/ssh_key_cache.py stats --name global-secrets
+scripts/ssh_key_cache.py stats --name personal-secrets
+```
+
+If you get `Key not found or expired`, add the SSH private key to the key retention service again:
+
+```bash
+scripts/ssh_key_cache.py store ~/.ssh/id_ed25519_vault_lab --hours 8 --name global-secrets
+scripts/ssh_key_cache.py store ~/.ssh/id_ed25519_vault_lab --hours 8 --name personal-secrets
+```
+
+## ⚙️ Step 4: `ansible.cfg`
+
+If you're testing in a lab, make sure your `ansible.cfg` contains:
+
+```ini
+[defaults]
+vault_identity_list = global@scripts/vault_wrapper-client.sh, personal@scripts/vault_wrapper-client.sh
+```
+
+> Adjust the `global@...` and `personal@...` paths to match your setup.
+
+## 📍 Step 5: Location of `ansible.cfg`
+
+Check that `ANSIBLE_CONFIG` points to your `ansible.cfg`, and confirm which file Ansible actually loads:
+
+```bash
+echo "${ANSIBLE_CONFIG}"
+ansible --version | grep "config file"
+# Adjust if needed:
+# export ANSIBLE_CONFIG="${PWD}/ansible.cfg"
+# or remove it:
+# unset ANSIBLE_CONFIG
+```

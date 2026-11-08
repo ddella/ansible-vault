@@ -41,18 +41,18 @@ echo "ARG1=[${1}] - ARG2/VAULT_ID=[${VAULT_ID}] - SSH Private Key=[${AGE_PRIVATE
 # ---------------------------------------------------------
 # Return the correct password based on the vault-id
 if [[ "$VAULT_ID" == "dev" ]]; then
-  base64 -d /workspaces/avd-non-prod/.secrets/.vault-secret-dev.age | age -d -i "$IDENTITY_FILE"
+  base64 -d .vault-secret-dev.age | age -d -i "$IDENTITY_FILE"
 elif [[ "$VAULT_ID" == "prod" ]]; then
-  base64 -d /workspaces/avd-non-prod/.secrets/.vault-secret-prod.age | age -d -i "$IDENTITY_FILE"
+  base64 -d .vault-secret-prod.age | age -d -i "$IDENTITY_FILE"
 
 ### Global Secrets `global`
 elif [[ "$VAULT_ID" == "global" ]]; then
-  base64 -d /workspaces/Ansible-Vault/.secrets/.global-ansible-vault.age \
-  | age -d -i <(python3 /workspaces/Ansible-Vault/scripts/ssh_key_cache.py get --name global-secrets)
+  base64 -d .secrets/.global-ansible-vault.age \
+  | age -d -i <(python3 scripts/ssh_key_cache.py get --name global-secrets)
 ### Personal Secrets for `personal`
 elif [[ "$VAULT_ID" == "personal" ]]; then
-  base64 -d /workspaces/Ansible-Vault/.secrets/.personal-ansible-vault.age \
-  | age -d -i <(python3 /workspaces/Ansible-Vault/scripts/ssh_key_cache.py get --name personal-secrets)
+  base64 -d .secrets/.personal-ansible-vault.age \
+  | age -d -i <(python3 scripts/ssh_key_cache.py get --name personal-secrets)
 
 ### 🤔 Not sure we want this 🤔
 else

@@ -1,26 +1,26 @@
 ---
 # This Ansible Playbook reads the global Ansible Vault.
-# 👉 Run command: ansible-playbook -i localhost, -c local -e "user=DDN" playbooks/verify_global_secrets.yml
+# 👉 Run command: ansible-playbook -i localhost, -c local playbooks/read_vaults.yml
 
-- name: Test CloudVision Write Access (Create Workspace)
+- name: 🧐📖 Read global and personal vault
   hosts: localhost
   connection: local
   gather_facts: false
 
-  ### Load the encrypted files. We have a main Vault and each user has a personal vault
+  ### Load the encrypted files. We have a global Vault and each user has a personal vault
   # 👉 All paths is relative to the Playbooks directory 👈
   pre_tasks:
-    - name: Load global Ansible Vault file into a temporary variable
+    - name: 📦 Load global Ansible Vault file into a temporary variable
       ansible.builtin.include_vars:
         file: ../global_vars/global-ansible-vault-enc.yml
         name: global_vault
 
-    - name: Load personal Ansible Vault file into a temporary variable
+    - name: 📦 Load personal Ansible Vault file into a temporary variable
       ansible.builtin.include_vars:
         file: ../global_vars/personal-ansible-vault-enc.yml
         name: personal_vault
 
-    - name: Merge the above dictionaries together
+    - name: 🔗 Merge the above dictionaries together
       ansible.builtin.set_fact:
         # Merge both dictionaries together. The actual name of the shared key is: 'vault'
         vault: "{{ global_vault.vault | default({}) | combine(personal_vault.vault | default({}), recursive=True) }}"
@@ -30,28 +30,24 @@
     - name: 🔧 Set Global variables
       run_once: true
       ansible.builtin.set_fact:
-        # metadata_description: "{{ global_vault.vault.metadata.shared_secrets.description }}"
-        metadata_description: "{{ vault.metadata.shared_secrets.description }}"
-        # cv_token: "{{ vault.cvp_token.service_token }}"
-        # cv_verify_certs: true # Enable TLS verification
+        global_vault: "{{ global_vault }}"
 
     ### ✋ DO NOT PRINT THE FULL TOKEN ✋ ###
     - name: 🕵️ Print global variables
       run_once: true
       ansible.builtin.debug:
         msg:
-          - "vault.metadata.shared_secrets.description: [{{ metadata_description }}]"
+          - "global vault: [{{ global_vault | to_nice_yaml }}]"
           # - "CloudVision token   cv_token : [....{{ cv_token[-10:] }}]"
 
     ### Set the variables in the playbook ###
     - name: 🔧 Set Personal variables
       run_once: true
       ansible.builtin.set_fact:
-        cvp_token: "{{ personal_vault.vault.personal.cvp_token }}"
+        personal_vault: "{{ personal_vault }}"
 
-    ### ✋ DO NOT PRINT THE FULL TOKEN ✋ ###
-    - name: 🕵️ Print global variables
+    - name: 🕵️ Print personal variables
       run_once: true
       ansible.builtin.debug:
         msg:
-          - "personal_vault.vault.personal.cvp_token: [{{ cvp_token }}]"
+          - "personal vault: [{{ personal_vault | to_nice_yaml }}]"
