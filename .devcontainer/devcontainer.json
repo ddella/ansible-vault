@@ -1,0 +1,84 @@
+/*
+https://containers.dev/implementors/json_reference/
+
+⚠️ If you need to change the "image" name ⚠️
+Keeping the image name in sync: it appears in 3 places in this file.
+When you bump the version, update 👉all 3👈. A find-and-replace on 'acme-avd6.5.0-python3.14'
+covers it.
+
+# On GitLab
+docker pull ghcr.io/ddella/avd-containers/avd6.5.0-python3.14:latest
+# On GitLab
+docker pull registry.gitlab.com/ddella/avd-containers/avd6.5.0-python3.14:latest
+
+*/
+{
+"name": "Ansible Vault ",
+  "image": "ghcr.io/ddella/avd-containers/acme-avd6.5.0-python3.14:latest",
+  "initializeCommand": "docker pull ghcr.io/ddella/avd-containers/acme-avd6.5.0-python3.14:latest",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+      "version": "latest",
+      "enableNonRootDocker": "true",
+      "moby": false,
+      "dockerDashComposeVersion": "v2"
+    }
+  },
+
+  // Lifecycle order: initializeCommand (host) → onCreateCommand → updateContentCommand
+  //   → postCreateCommand → postStartCommand → postAttachCommand
+  // VS Code waits for onCreateCommand before connecting, so the first terminal gets the shell setup.
+  // The object form runs both scripts in parallel (they don't depend on each other).
+  "onCreateCommand": {
+    "certs": "zsh .devcontainer/get-certs.sh",
+    "shell": "zsh .devcontainer/setup.sh"
+  },
+  // Runs on every start: compares the image pulled by initializeCommand with the running container
+  "postStartCommand": "zsh .devcontainer/check-update.sh",
+
+  "containerEnv": {
+    // Timezone without sudo/dpkg-reconfigure (tzdata is in the image)
+    // "TZ": "America/Montreal",
+    // AGE private key, available to every process (not only zsh)
+    // "AGE_PRIVATE_KEY": "/home/avd/.ssh/id_ed25519_avd",
+    // Read by check-update.sh. ⚠️ Keep in sync with "image" and "initializeCommand"
+    "DEVCONTAINER_IMAGE": "ghcr.io/ddella/avd-containers/acme-avd6.5.0-python3.14:latest"
+  },
+
+  // tells the container to share the kernel's hostname namespace with your local machine
+  "runArgs": ["--uts=host"],
+  "remoteUser": "avd",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        // Scales the entire user interface (menus, sidebar, text)
+        "window.zoomLevel": 2,
+        // Makes the file explorer sidebar text easier to read
+        "workbench.tree.indent": 20,
+        // Prevents pixelated font rendering on certain high-res screens
+        "editor.fontLigatures": true,
+        // Boosts terminal text readability (often stays small despite window zoom)
+        "terminal.integrated.fontSize": 14,
+        "terminal.integrated.lineHeight": 1.2,
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "editor.fontSize": 14,
+        "editor.tabSize": 2
+      },
+      "extensions": [
+        "ms-vscode-remote.remote-containers"
+      ]
+    }
+  },
+
+  // Add mounts to a container
+  "mounts": [
+    "source=${localEnv:HOME}/.ssh,target=/home/avd/.ssh,type=bind,consistency=cached",
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
+    // map the OS trusted store to Python trusted store
+    // "source=/etc/ssl/certs/ca-certificates.crt,target=/home/avd/.local/lib/python3.14/site-packages/certifi/cacert.pem,type=bind"
+  ],
+  "remoteEnv": {
+    "GITLAB_PAT": "${localEnv:GITLAB_PAT}",
+    "LOCAL_WORKSPACE_FOLDER": "${localWorkspaceFolder}"
+  }
+}

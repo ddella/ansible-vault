@@ -1,0 +1,23 @@
+---
+vault:
+  personal:
+    ############################################################
+    # METADATA
+    ############################################################
+    metadata:
+      personal_token:
+        version: "2026-11-08"
+        environment: "SANDBOX"            # PROD | NONPROD | SANDBOX
+        purpose: "SECRETS"                # SECRETS | TOKEN
+        description: "Personal passwords."
+        owner: "email@example.com"       # Crucial for personal vaults
+        svc_account: "svc_123"
+        token_id: "aabbccddeeff00112233"
+        token_created: "2026-11-08"
+        token_expiry: "Nov 11, 2027 23:59:59"        # Tells the user when their script will break
+
+    ############################################################
+    # CVASS / AUTHENTICATION
+    ############################################################
+    cvp_token:
+      service_token: MY_PERSONAL_CLOUD_VISION_TOKEN

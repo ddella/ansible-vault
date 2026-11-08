@@ -1,0 +1,144 @@
+---
+vault:
+
+  ############################################################
+  # METADATA
+  ############################################################
+  metadata:
+    shared_secrets:
+      version: "2026-11-08"
+      environment: "SANDBOX"            # PROD | NONPROD | SANDBOX
+      purpose: "SECRETS"                # SECRETS | TOKEN
+      description: "Global Ansible Vault."
+      maintainer: "network-automation-team"
+      last_rotated: "2026-11-08"
+      rotation_frequency: "90 days"     # Optional: usefull for auditing???
+
+  ############################################################
+  # AAA / AUTHENTICATION
+  ############################################################
+
+  aaa:
+    tacacs:
+      servers:
+        server1:
+          key: TACACS_SERVER1_KEY
+        server2:
+          key: TACACS_SERVER2_KEY
+
+    radius:
+      servers:
+        server1:
+          key: RADIUS_SERVER1_KEY
+        server2:
+          key: RADIUS_SERVER2_KEY
+
+    enable:
+      password: EOS_ENABLE_PASSWORD_HASH
+
+
+  ############################################################
+  # USERS & ACCESS
+  ############################################################
+
+  users:
+    admin:
+      password: EOS_ADMIN_PASSWORD
+      sha512_password: EOS_ADMIN_SHA512_PASSWORD
+    cvpadmin:
+      password: EOS_CVPADMIN_PASSWORD
+    daniel:
+      ssh_keys:
+        primary: |
+          ssh-ed25519 AAAA... my_name@example.com
+        secondary: |
+          ssh-ed25519 AAAA... my_name_2@example.com
+
+  eapi:
+    username: EOS_EAPI_USERNAME
+    password: EOS_EAPI_PASSWORD
+
+
+  ############################################################
+  # SNMP
+  ############################################################
+
+  snmpv2:
+    community1: SNMP_V2_PUBLIC
+    community2: SNMP_V2_PUBLIC
+
+  snmpv3:
+    user1:
+      auth: SNMP_USER1_AUTH_KEY
+      priv: SNMP_USER1_PRIV_KEY
+    user2:
+      auth: SNMP_USER2_AUTH_KEY
+      priv: SNMP_USER2_PRIV_KEY
+
+
+  ############################################################
+  # ROUTING / BGP / EVPN
+  ############################################################
+
+  bgp:
+    dc_1:
+      underlay_password: BGP_UNDERLAY_PASSWORD
+      overlay_password: BGP_OVERLAY_PASSWORD
+      mlag_password: BGP_MLAG_PASSWORD
+      evpn_route_server_password: BGP_EVPN_RS_PASSWORD
+    dc_2:
+      underlay_password: BGP_UNDERLAY_PASSWORD
+      overlay_password: BGP_OVERLAY_PASSWORD
+      mlag_password: BGP_MLAG_PASSWORD
+      evpn_route_server_password: BGP_EVPN_RS_PASSWORD
+
+  ############################################################
+  # SECURITY (MACsec / IPsec / NTP auth)
+  ############################################################
+
+  macsec:
+    mka_key: MACSEC_MKA_KEY
+
+  ipsec:
+    profile1:
+      key: IPSEC_PROFILE1_KEY
+
+  ntp:
+    auth_keys:
+      key1: NTP_AUTH_KEY
+      key2: NTP_AUTH_KEY
+
+
+  ############################################################
+  # CVP / CLOUDVISION
+  ############################################################
+
+  cvp:
+    server: "www.cv-prod-us-central1-c.arista.io"
+    username: CVP_USERNAME
+    password: CVP_PASSWORD
+
+    service_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpX..."
+    onboarding_token: "eyJhbGciOiJSUzI1NiIsInR5cCI..."
+
+
+  ############################################################
+  # ZTP / ONBOARDING
+  ############################################################
+
+  ztp:
+    default_password: EOS_ZTP_PASSWORD
+
+
+  ############################################################
+  # SYSLOG / TLS / CERTIFICATES
+  ############################################################
+
+  syslog:
+    tls_key: SYSLOG_TLS_PRIVATE_KEY
+
+  certificates:
+    https_private_key: |
+      -----BEGIN ENCRYPTED PRIVATE KEY-----
+      ...
+      -----END ENCRYPTED PRIVATE KEY-----
